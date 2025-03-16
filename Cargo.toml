@@ -1,0 +1,26 @@
+[package]
+name = "quinn_echo_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap ={ version = "4.5", features = ["derive", "cargo"]}
+quinn = {version = "0.11"}
+rcgen = "0.13"
+rustls = { version = "0.23.5", default-features = false, features = ["ring", "std"] }
+tokio = { version =  "1.38", features = ["full"]}
+tokio-util = {version = "*"}
+tracing = { version = "0.1.10", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
+
+[dev-dependencies]
+criterion = { version = "0.3", features = ["async_tokio"]}
+
+[[example]]
+name = "client"
+path = "examples/client.rs"
+
+[[example]]
+name = "server"
+path = "examples/server.rs"
