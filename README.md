@@ -26,41 +26,43 @@ This is an echo server implementation based on the QUIC protocol, supporting tra
 
 ## Usage
 
+By default, both server and client run in insecure mode (without certificate verification). You can enable certificate mode by specifying the certificate path.
+
 ### Server
 
-#### With Certificate Mode
+#### Default Mode (Insecure)
 
 ```bash
 cargo run --example server
 ```
 
-This will start the server and generate a self-signed certificate, saving it to the `cert.der` file.
+This will start the server in insecure mode without using certificates.
 
-#### With Insecure Mode
+#### Certificate Mode
 
 ```bash
-cargo run --example server -- --insecure
+cargo run --example server -- --cert server_cert.der
 ```
 
-This will start the server without requiring certificate validation from clients.
+This will start the server with certificate validation. If the certificate file doesn't exist, it will be generated and saved to the specified path.
 
 ### Client
 
-#### With Certificate Mode
+#### Default Mode (Insecure)
 
 ```bash
 cargo run --example client
 ```
 
-The client will read the server certificate from the `cert.der` file and validate the connection.
+The client will connect to the server without certificate verification.
 
-#### With Insecure Mode
+#### Certificate Mode
 
 ```bash
-cargo run --example client -- --insecure
+cargo run --example client -- --cert server_cert.der
 ```
 
-The client will skip certificate validation and connect directly to the server.
+The client will read the server certificate from the specified file and validate the connection.
 
 ### Custom Messages
 
@@ -88,6 +90,7 @@ This will send a custom message and repeat it 3 times.
 
 ## Notes
 
-- Insecure mode (`--insecure`) is only suitable for development and testing environments, not recommended for production use
+- Default mode is insecure (no certificate verification), which is suitable for development and testing environments
+- Certificate mode should be used for production environments
 - Default listening address is `127.0.0.1:5001`
-- Certificates are saved by default in the `cert.der` file in the current directory 
+- When using certificate mode, the certificate file will be generated if it doesn't exist 

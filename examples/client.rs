@@ -5,7 +5,9 @@ use {
     std::net::{IpAddr, SocketAddr},
     std::time::Duration,
     std::fs,
+    std::path::PathBuf,
     quinn_echo_server::configure::{configure_client, configure_client_insecure},
+    tokio::io::AsyncWriteExt,
     tracing::{info, error},
     rustls::pki_types::CertificateDer,
 };
@@ -29,13 +31,9 @@ struct Cli {
     #[clap(long, default_value = "1")]
     repeat: usize,
     
-    /// Path to the server certificate
-    #[clap(long, default_value = "cert.der")]
-    cert_path: String,
-    
-    /// Skip certificate verification (insecure)
+    /// Path to the server certificate (if not specified, insecure mode is used)
     #[clap(long)]
-    insecure: bool,
+    cert: Option<PathBuf>,
 }
 
 // Read data from stream
@@ -64,17 +62,24 @@ async fn main() -> Result<()> {
     info!("Connecting to server: {}", server_addr);
 
     // Configure client
-    let client_config = if args.insecure {
-        info!("Using insecure mode - skipping certificate verification");
-        configure_client_insecure()
-    } else {
+    let client_config = if let Some(cert_path) = &args.cert {
+        // Certificate mode
+        info!("Using certificate mode with path: {}", cert_path.display());
+        
         // Read server certificate from file
-        info!("Reading certificate from file: {}", args.cert_path);
-        let cert_bytes = fs::read(&args.cert_path)
-            .with_context(|| format!("Failed to read certificate file: {}", args.cert_path))?;
+        if !cert_path.exists() {
+            return Err(anyhow::anyhow!("Certificate file not found: {}", cert_path.display()));
+        }
+        
+        let cert_bytes = fs::read(cert_path)
+            .with_context(|| format!("Failed to read certificate file: {}", cert_path.display()))?;
         info!("Certificate size: {} bytes", cert_bytes.len());
         let server_cert = CertificateDer::from(cert_bytes);
         configure_client(server_cert)
+    } else {
+        // Insecure mode (default)
+        info!("Using insecure mode (no certificate verification)");
+        configure_client_insecure()
     };
     
     // Create client endpoint

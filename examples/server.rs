@@ -1,12 +1,19 @@
 use {
     anyhow::{Result, Context},
     clap::Parser,
-    quinn::{Endpoint, Connection, RecvStream},
+    quinn::{Endpoint, Connection, RecvStream, SendStream},
     std::net::SocketAddr,
     std::fs::File,
     std::io::Write,
-    quinn_echo_server::configure::{configure_server, configure_server_insecure},
-    tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    std::path::PathBuf,
+    quinn_echo_server::{
+        configure::{configure_server, configure_server_insecure},
+        server::listen,
+    },
+    tokio::{
+        io::AsyncWriteExt,
+        sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    },
     tokio_util::sync::CancellationToken,
     tracing::{info, error},
 };
@@ -18,13 +25,9 @@ struct Cli {
     #[clap(default_value = "127.0.0.1:5001")]
     listen_address: SocketAddr,
     
-    /// Path to save the certificate
-    #[clap(long, default_value = "cert.der")]
-    cert_path: String,
-    
-    /// Skip using certificate (insecure)
+    /// Path to save/load the certificate (if not specified, insecure mode is used)
     #[clap(long)]
-    insecure: bool,
+    cert: Option<PathBuf>,
 }
 
 // Custom server handler function
@@ -97,22 +100,30 @@ async fn main() -> Result<()> {
     // Configure server
     info!("Configuring server...");
     
-    let server_endpoint = if args.insecure {
-        info!("Using insecure mode - no certificate");
-        let server_config = configure_server_insecure(1500 * 100);
-        Endpoint::server(server_config, args.listen_address)?
-    } else {
+    let server_endpoint = if let Some(cert_path) = &args.cert {
+        // Certificate mode
+        info!("Using certificate mode with path: {}", cert_path.display());
+        
         let (server_config, server_cert) = configure_server(1500 * 100);
         
-        // Save certificate to file
-        info!("Saving certificate to file...");
-        let cert_bytes = server_cert.as_ref();
-        info!("Certificate size: {} bytes", cert_bytes.len());
-        let mut file = File::create(&args.cert_path)
-            .with_context(|| format!("Failed to create certificate file: {}", args.cert_path))?;
-        file.write_all(cert_bytes)?;
-        info!("Certificate saved to: {}", args.cert_path);
+        // Save certificate to file if it doesn't exist
+        if !cert_path.exists() {
+            info!("Certificate file not found, generating and saving...");
+            let cert_bytes = server_cert.as_ref();
+            info!("Certificate size: {} bytes", cert_bytes.len());
+            let mut file = File::create(cert_path)
+                .with_context(|| format!("Failed to create certificate file: {}", cert_path.display()))?;
+            file.write_all(cert_bytes)?;
+            info!("Certificate saved to: {}", cert_path.display());
+        } else {
+            info!("Using existing certificate file: {}", cert_path.display());
+        }
         
+        Endpoint::server(server_config, args.listen_address)?
+    } else {
+        // Insecure mode (default)
+        info!("Using insecure mode (no certificate)");
+        let server_config = configure_server_insecure(1500 * 100);
         Endpoint::server(server_config, args.listen_address)?
     };
     
