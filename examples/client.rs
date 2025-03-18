@@ -6,7 +6,7 @@ use {
     std::time::Duration,
     std::fs,
     std::path::PathBuf,
-    quinn_echo_server::configure::{configure_client, configure_client_insecure},
+    quinn_echo_server::configure::{configure_client, configure_client_insecure, configure_client_with_pem_cert},
     tokio::io::AsyncWriteExt,
     tracing::{info, error},
     rustls::pki_types::CertificateDer,
@@ -34,6 +34,14 @@ struct Cli {
     /// Path to the server certificate (if not specified, insecure mode is used)
     #[clap(long)]
     cert: Option<PathBuf>,
+
+    /// Path to the server PEM certificate
+    #[clap(long)]
+    cert_pem: Option<String>,
+
+    /// Use insecure mode (ignore certificate verification)
+    #[clap(long)]
+    insecure: bool,
 }
 
 // Read data from stream
@@ -62,8 +70,17 @@ async fn main() -> Result<()> {
     info!("Connecting to server: {}", server_addr);
 
     // Configure client
-    let client_config = if let Some(cert_path) = &args.cert {
-        // Certificate mode
+    let client_config = if args.insecure {
+        // 不安全模式
+        info!("Using insecure mode (no certificate verification)");
+        configure_client_insecure()
+    } else if let Some(cert_pem) = &args.cert_pem {
+        // PEM证书模式
+        info!("Using PEM certificate: {}", cert_pem);
+        configure_client_with_pem_cert(cert_pem)
+            .context("Failed to configure client with PEM certificate")?
+    } else if let Some(cert_path) = &args.cert {
+        // 使用服务器证书模式
         info!("Using certificate mode with path: {}", cert_path.display());
         
         // Read server certificate from file
@@ -77,8 +94,8 @@ async fn main() -> Result<()> {
         let server_cert = CertificateDer::from(cert_bytes);
         configure_client(server_cert)
     } else {
-        // Insecure mode (default)
-        info!("Using insecure mode (no certificate verification)");
+        // 默认使用不安全模式
+        info!("No certificate specified, using insecure mode");
         configure_client_insecure()
     };
     
