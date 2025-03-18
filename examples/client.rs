@@ -71,16 +71,16 @@ async fn main() -> Result<()> {
 
     // Configure client
     let client_config = if args.insecure {
-        // 不安全模式
+        // Insecure mode
         info!("Using insecure mode (no certificate verification)");
         configure_client_insecure()
     } else if let Some(cert_pem) = &args.cert_pem {
-        // PEM证书模式
+        // PEM certificate mode
         info!("Using PEM certificate: {}", cert_pem);
         configure_client_with_pem_cert(cert_pem)
             .context("Failed to configure client with PEM certificate")?
     } else if let Some(cert_path) = &args.cert {
-        // 使用服务器证书模式
+        // Server certificate mode
         info!("Using certificate mode with path: {}", cert_path.display());
         
         // Read server certificate from file
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
         let server_cert = CertificateDer::from(cert_bytes);
         configure_client(server_cert)
     } else {
-        // 默认使用不安全模式
+        // Default insecure mode
         info!("No certificate specified, using insecure mode");
         configure_client_insecure()
     };

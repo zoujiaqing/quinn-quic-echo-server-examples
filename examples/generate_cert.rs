@@ -18,23 +18,23 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
-    // 解析命令行参数
+    // Parse command line arguments
     let args = Cli::parse();
     
     println!("Generating self-signed certificate...");
     println!("Certificate will be saved to: {}", args.cert.display());
     println!("Private key will be saved to: {}", args.key.display());
     
-    // 生成证书和私钥
+    // Generate certificate and private key
     let subject_alt_names = vec!["localhost".to_string()];
     let rcgen::CertifiedKey { cert, key_pair } = rcgen::generate_simple_self_signed(subject_alt_names)
         .context("Failed to generate self-signed certificate")?;
     
-    // 将证书保存为PEM文件
+    // Save certificate as PEM file
     std::fs::write(&args.cert, cert.pem()).context("Failed to write certificate file")?;
     println!("Certificate saved successfully");
     
-    // 将私钥保存为PEM文件
+    // Save private key as PEM file
     std::fs::write(&args.key, key_pair.serialize_pem()).context("Failed to write private key file")?;
     println!("Private key saved successfully");
     

@@ -117,12 +117,12 @@ async fn main() -> Result<()> {
     info!("Configuring server...");
     
     let server_endpoint = if args.insecure {
-        // 不安全模式
+        // Insecure mode
         info!("Using insecure mode (no certificate verification)");
         let server_config = configure_server_insecure(1500 * 100);
         Endpoint::server(server_config, args.listen_address)?
     } else if args.usepem && args.cert_pem.is_some() && args.key_pem.is_some() {
-        // PEM证书模式
+        // PEM certificate mode
         let cert_path = args.cert_pem.unwrap();
         let key_path = args.key_pem.unwrap();
         info!("Using PEM certificate mode");
@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
             .context("Failed to configure server with PEM files")?;
         Endpoint::server(server_config, args.listen_address)?
     } else if let Some(cert_path) = &args.cert {
-        // 使用默认证书模式
+        // Default certificate mode
         info!("Using certificate mode with path: {}", cert_path.display());
         
         let (server_config, server_cert) = configure_server(1500 * 100);
@@ -153,7 +153,7 @@ async fn main() -> Result<()> {
         
         Endpoint::server(server_config, args.listen_address)?
     } else {
-        // 默认使用内置自签名证书
+        // Default built-in self-signed certificate
         info!("Using default self-signed certificate mode");
         let (server_config, _) = configure_server(1500 * 100);
         Endpoint::server(server_config, args.listen_address)?

@@ -1,96 +1,141 @@
-# QUIC Throttling Echo Server
+# QUIC Echo Server
 
-This is an echo server implementation based on the QUIC protocol, supporting traffic throttling and certificate validation/non-validation modes. After accepting a client connection, the server proactively sends a welcome message and echoes back any messages sent by the client.
+A high-performance echo server implementation based on the QUIC protocol, built with Rust and the Quinn library. This server can receive client messages and echo them back, supporting various TLS certificate configuration options.
 
 ## Features
 
 - High-performance communication based on QUIC protocol
-- Support for certificate validation and non-validation modes
-- Proactive welcome message from server
-- Message echo functionality
-- Configurable traffic throttling
-- Comprehensive logging
+- Multiple TLS certificate configuration methods (self-signed, PEM files, insecure mode)
+- Automatic certificate generation and management
+- Bidirectional communication between client and server
+- Simple Echo service example
+- Configurable receive window size and timeout parameters
 
-## Main Dependencies
+## Building
 
-| Dependency | Version | Purpose |
-|------------|---------|---------|
-| quinn | 0.11 | QUIC protocol implementation |
-| rustls | 0.23.5 | TLS encryption implementation with ring backend |
-| tokio | 1.38 | Asynchronous runtime with full features |
-| rcgen | 0.13 | Certificate generation |
-| clap | 4.5 | Command-line argument parsing with derive and cargo features |
-| tracing | 0.1.10 | Logging framework |
-| anyhow | 1.0 | Error handling |
-| tracing-subscriber | 0.3.0 | Logging subscriber implementation |
+```bash
+cargo build --release
+```
 
-## Usage
+## Certificate Management
 
-By default, both server and client run in insecure mode (without certificate verification). You can enable certificate mode by specifying the certificate path.
+The server requires TLS certificates to work properly. This project provides multiple certificate configuration options:
 
-### Server
+### Generate Certificates with OpenSSL
 
-#### Default Mode (Insecure)
+You can generate self-signed certificates using the following command:
+
+```bash
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+  -keyout private.pem -out public.pem \
+  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+This will generate two files:
+- `public.pem`: Contains the public key and certificate
+- `private.pem`: Contains the private key
+
+### Using Generated Certificates
+
+The program will automatically generate and save certificates, or use existing certificate files.
+
+## Running the Server
+
+The server has multiple startup modes that can be configured via command-line parameters:
+
+### PEM Certificate Mode (Recommended)
+
+Run the server using PEM format certificate and private key:
+
+```bash
+cargo run --example server -- --usepem --cert-pem public.pem --key-pem private.pem
+```
+
+### Default Self-Signed Certificate Mode
+
+Use the built-in self-signed certificate:
 
 ```bash
 cargo run --example server
 ```
 
-This will start the server in insecure mode without using certificates.
+### Save Certificate Mode
 
-#### Certificate Mode
-
-```bash
-cargo run --example server -- --cert server_cert.der
-```
-
-This will start the server with certificate validation. If the certificate file doesn't exist, it will be generated and saved to the specified path.
-
-### Client
-
-#### Default Mode (Insecure)
+Generate a self-signed certificate and save it to a file:
 
 ```bash
-cargo run --example client
+cargo run --example server -- --cert certificate.der
 ```
 
-The client will connect to the server without certificate verification.
+### Insecure Mode
 
-#### Certificate Mode
+Disable certificate validation (for testing only):
 
 ```bash
-cargo run --example client -- --cert server_cert.der
+cargo run --example server -- --insecure
 ```
 
-The client will read the server certificate from the specified file and validate the connection.
+## Server Parameters
 
-### Custom Messages
+The server supports the following command-line parameters:
+
+- `<listen_address>`: Listening address, default is `127.0.0.1:5001`
+- `--cert <PATH>`: Certificate save path
+- `--usepem`: Use PEM format certificates
+- `--cert-pem <PATH>`: PEM format certificate path
+- `--key-pem <PATH>`: PEM format private key path
+- `--insecure`: Insecure mode, disables certificate validation
+
+## Running the Client
+
+The client also supports multiple validation modes:
+
+### Validate Server with PEM Certificate
 
 ```bash
-cargo run --example client -- --message "Custom message" --repeat 3
+cargo run --example client -- --cert-pem public.pem
 ```
 
-This will send a custom message and repeat it 3 times.
+### Validate Server with DER Certificate
 
-## Workflow
+```bash
+cargo run --example client -- --cert certificate.der
+```
 
-1. Server starts and listens for connections
-2. Client connects to the server
-3. Server sends a "Hello Client" welcome message to the client
-4. Client sends a message to the server
-5. Server echoes the received message back to the client
-6. Client verifies if the echo message is correct
+### Insecure Mode (No Server Certificate Validation)
 
-## Project Structure
+```bash
+cargo run --example client -- --insecure
+```
 
-- `src/configure.rs`: Configuration module, handling certificates and connection setup
-- `src/server.rs`: Core server implementation
+## Client Parameters
+
+The client supports the following command-line parameters:
+
+- `--server-addr <IP>`: Server address, default is `127.0.0.1`
+- `--server-port <PORT>`: Server port, default is `5001`
+- `--message <TEXT>`: Message to send, default is `hello world`
+- `--repeat <N>`: Number of times to repeat the message, default is `1`
+- `--cert <PATH>`: DER format certificate path
+- `--cert-pem <PATH>`: PEM format certificate path
+- `--insecure`: Insecure mode, disables certificate validation
+
+## Communication Flow
+
+1. Client connects to the server
+2. Server sends "Hello Client" message to the client
+3. Client sends messages to the server
+4. Server echoes received messages back to the client
+
+## Development
+
+This project uses Quinn as the QUIC protocol implementation and rustls for TLS. Project structure:
+
+- `src/configure.rs`: Certificate and configuration related functionality
+- `src/server.rs`: Server core functionality
 - `examples/server.rs`: Server example
 - `examples/client.rs`: Client example
 
-## Notes
+## License
 
-- Default mode is insecure (no certificate verification), which is suitable for development and testing environments
-- Certificate mode should be used for production environments
-- Default listening address is `127.0.0.1:5001`
-- When using certificate mode, the certificate file will be generated if it doesn't exist 
+MIT
