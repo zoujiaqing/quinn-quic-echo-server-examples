@@ -6,16 +6,14 @@ use {
     std::fs::File,
     std::io::Write,
     std::path::PathBuf,
-    quinn_echo_server::{
-        configure::{configure_server, configure_server_insecure, configure_server_with_pem_files},
-        server::listen,
-    },
     tokio::{
         io::AsyncWriteExt,
         sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     },
     tokio_util::sync::CancellationToken,
     tracing::{info, error},
+    std::sync::Arc,
+    quinn_echo_server::{configure, server::EchoServer},
 };
 
 #[derive(Parser)]
@@ -44,47 +42,57 @@ struct Cli {
     /// Use insecure mode (ignore certificate verification)
     #[clap(long)]
     insecure: bool,
+
+    /// 是否要求客户端证书
+    #[clap(long, default_value = "false")]
+    require_client_cert: bool,
 }
 
 // Custom server handler function
 async fn handle_connection(connection: Connection, sender: UnboundedSender<Vec<u8>>) -> Result<()> {
-    // Proactively send "Hello Client" message to the client
-    let mut send_stream = connection.open_uni().await?;
-    let hello_message = b"Hello Client";
-    send_stream.write_all(hello_message).await?;
-    send_stream.finish()?;
-    info!("Sent 'Hello Client' to client");
+    // 不再主动发送单向流的欢迎消息
+    // 改为在双向流中发送欢迎消息
     
     // Receive client messages and echo them back
-    while let Ok(stream) = connection.accept_uni().await {
-        tokio::spawn(handle_stream(stream, sender.clone(), connection.clone()));
-    }
-    
-    Ok(())
-}
-
-// Handle a single stream
-async fn handle_stream(mut stream: RecvStream, sender: UnboundedSender<Vec<u8>>, connection: Connection) -> Result<()> {
-    let mut message = Vec::new();
-    
-    // Read client message
-    while let Some(chunk) = stream.read_chunk(4096, false).await? {
-        message.extend_from_slice(&chunk.bytes);
-    }
-    
-    if !message.is_empty() {
-        // Send echo message back to client
-        let mut send_stream = connection.open_uni().await?;
-        send_stream.write_all(&message).await?;
-        send_stream.finish()?;
-        info!("Echoed {} bytes back to client", message.len());
+    while let Ok(stream) = connection.accept_bi().await {
+        let (mut send, mut recv) = stream;
+        let sender = sender.clone();
+        let connection = connection.clone();
         
-        // Send to consumer
-        let _ = sender.send(message.clone());
-        
-        // Print received message
-        let text = String::from_utf8_lossy(&message);
-        info!("Received message: {} ({} bytes)", text, message.len());
+        tokio::spawn(async move {
+            // 立即发送欢迎消息
+            let hello_message = b"Hello Client";
+            if let Err(e) = send.write_all(hello_message).await {
+                error!("Failed to write welcome message: {}", e);
+                return;
+            }
+            info!("Sent 'Hello Client' to client in bi-directional stream");
+            
+            let mut data = Vec::new();
+            while let Some(chunk) = recv.read_chunk(4096, false).await.unwrap_or(None) {
+                data.extend_from_slice(&chunk.bytes);
+            }
+            
+            if !data.is_empty() {
+                // Echo back the data
+                if let Err(e) = send.write_all(&data).await {
+                    error!("Failed to write echo response: {}", e);
+                    return;
+                }
+                
+                if let Err(e) = send.finish() {
+                    error!("Failed to finish stream: {}", e);
+                    return;
+                }
+                
+                // Send to consumer
+                let _ = sender.send(data.clone());
+                
+                // Print received message
+                let text = String::from_utf8_lossy(&data);
+                info!("Received message: {} ({} bytes)", text, data.len());
+            }
+        });
     }
     
     Ok(())
@@ -119,7 +127,7 @@ async fn main() -> Result<()> {
     let server_endpoint = if args.insecure {
         // Insecure mode
         info!("Using insecure mode (no certificate verification)");
-        let server_config = configure_server_insecure(1500 * 100);
+        let server_config = configure::configure_server_insecure(1500 * 100);
         Endpoint::server(server_config, args.listen_address)?
     } else if args.usepem && args.cert_pem.is_some() && args.key_pem.is_some() {
         // PEM certificate mode
@@ -129,14 +137,21 @@ async fn main() -> Result<()> {
         info!("Certificate file: {}", cert_path);
         info!("Private key file: {}", key_path);
         
-        let server_config = configure_server_with_pem_files(cert_path, key_path, 1500 * 100)
-            .context("Failed to configure server with PEM files")?;
+        let server_config = if args.require_client_cert {
+            info!("Requiring client certificate");
+            configure::configure_server_require_client_cert_with_pem(&cert_path, &key_path)
+                .context("Failed to configure server with PEM files and client cert verification")?
+        } else {
+            configure::configure_server_with_pem_files(cert_path, key_path, 1500 * 100)
+                .context("Failed to configure server with PEM files")?
+        };
+        
         Endpoint::server(server_config, args.listen_address)?
     } else if let Some(cert_path) = &args.cert {
         // Default certificate mode
         info!("Using certificate mode with path: {}", cert_path.display());
         
-        let (server_config, server_cert) = configure_server(1500 * 100);
+        let (server_config, server_cert) = configure::configure_server(1500 * 100);
         
         // Save certificate to file if it doesn't exist
         if !cert_path.exists() {
@@ -155,47 +170,38 @@ async fn main() -> Result<()> {
     } else {
         // Default built-in self-signed certificate
         info!("Using default self-signed certificate mode");
-        let (server_config, _) = configure_server(1500 * 100);
+        let (server_config, _) = configure::configure_server(1500 * 100);
         Endpoint::server(server_config, args.listen_address)?
     };
     
     info!("Server endpoint created, listening on: {}", server_endpoint.local_addr()?);
     
-    // Create channel
+    // 创建数据通道
     let (sender, receiver) = unbounded_channel();
     
-    // Create cancellation token
+    // 创建 Cancellation Token
     let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
     
-    // Start consumer
-    let consumer_handle = tokio::spawn(consume_data(receiver));
+    // 设置 Ctrl+C 处理
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.unwrap();
+        info!("Ctrl+C received, shutting down...");
+        cancel_clone.cancel();
+    });
     
-    // Start server
-    info!("Server starting...");
+    // 启动数据消费任务
+    tokio::spawn(consume_data(receiver));
     
-    // Accept connections
-    while let Some(connecting) = server_endpoint.accept().await {
-        info!("Accepting new connection...");
-        match connecting.await {
-            Ok(connection) => {
-                info!("Client connected: {}", connection.remote_address());
-                let sender_clone = sender.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_connection(connection, sender_clone).await {
-                        error!("Connection handling error: {}", e);
-                    }
-                });
-            }
-            Err(e) => {
-                error!("Connection error: {}", e);
-            }
-        }
-    }
+    // 使用自定义的连接处理器处理连接
+    let handle_conn = |conn: Connection| {
+        let sender_clone = sender.clone();
+        handle_connection(conn, sender_clone)
+    };
     
-    // Wait for consumer to finish
-    if let Err(e) = consumer_handle.await {
-        error!("Consumer error: {}", e);
-    }
+    // 使用 EchoServer
+    let echo_server = EchoServer::new(server_endpoint);
+    echo_server.run_server(cancel).await?;
     
     info!("Server shut down");
     Ok(())

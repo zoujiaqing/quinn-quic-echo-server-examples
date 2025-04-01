@@ -25,7 +25,3 @@ path = "examples/client.rs"
 [[example]]
 name = "server"
 path = "examples/server.rs"
-
-[[example]]
-name = "generate_cert"
-path = "examples/generate_cert.rs"

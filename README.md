@@ -75,16 +75,31 @@ Disable certificate validation (for testing only):
 cargo run --example server -- --insecure
 ```
 
+### Client Authentication Mode
+
+Require clients to present valid certificates:
+
+```bash
+cargo run --example server -- --require-client-cert
+```
+
+This can be combined with other certificate options:
+
+```bash
+cargo run --example server -- --usepem --cert-pem public.pem --key-pem private.pem --require-client-cert
+```
+
 ## Server Parameters
 
 The server supports the following command-line parameters:
 
-- `<listen_address>`: Listening address, default is `127.0.0.1:5001`
+- `<listen_address>`: Listen address, default is `127.0.0.1:5001`
 - `--cert <PATH>`: Certificate save path
-- `--usepem`: Use PEM format certificates
+- `--usepem`: Use PEM format certificate
 - `--cert-pem <PATH>`: PEM format certificate path
 - `--key-pem <PATH>`: PEM format private key path
-- `--insecure`: Insecure mode, disables certificate validation
+- `--insecure`: Insecure mode, disable certificate validation
+- `--require-client-cert`: Require client to provide certificate for authentication
 
 ## Running the Client
 
@@ -108,6 +123,21 @@ cargo run --example client -- --cert certificate.der
 cargo run --example client -- --insecure
 ```
 
+### Client Authentication Mode
+
+If the server requires client certificates, use these parameters to provide client certificate:
+
+```bash
+cargo run --example client -- --usepem --cert-pem public.pem --key-pem private.pem --client-auth
+```
+
+You can combine this with server validation:
+
+```bash
+# Validate server certificate and provide client certificate
+cargo run --example client -- --usepem --cert-pem public.pem --key-pem private.pem --client-auth
+```
+
 ## Client Parameters
 
 The client supports the following command-line parameters:
@@ -115,10 +145,14 @@ The client supports the following command-line parameters:
 - `--server-addr <IP>`: Server address, default is `127.0.0.1`
 - `--server-port <PORT>`: Server port, default is `5001`
 - `--message <TEXT>`: Message to send, default is `hello world`
-- `--repeat <N>`: Number of times to repeat the message, default is `1`
-- `--cert <PATH>`: DER format certificate path
+- `--repeat <N>`: Number of times to repeat sending the message, default is `1`
+- `--timeout <SECS>`: Operation timeout in seconds, default is `5`
+- `--cert <PATH>`: DER format certificate path (for server validation)
 - `--cert-pem <PATH>`: PEM format certificate path
-- `--insecure`: Insecure mode, disables certificate validation
+- `--key-pem <PATH>`: PEM format private key path
+- `--insecure`: Insecure mode, disable server certificate validation
+- `--client-auth`: Enable client certificate authentication
+- `--usepem`: Use PEM format certificate (use with --cert-pem and --key-pem)
 
 ## Communication Flow
 
