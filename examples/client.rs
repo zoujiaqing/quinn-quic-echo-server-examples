@@ -148,24 +148,7 @@ async fn main() -> Result<()> {
         
         match bi_stream {
             Ok(Ok((mut send, mut recv))) => {
-                // First try to read server's welcome message (using peek method without consuming data)
-                let mut peek_buf = [0u8; 1024];
-                let greeting_result = tokio::time::timeout(
-                    Duration::from_millis(1000), // 1 second timeout
-                    recv.read(&mut peek_buf)
-                ).await;
-                
-                match greeting_result {
-                    Ok(Ok(Some(n))) if n > 0 => {
-                        let greeting = &peek_buf[..n];
-                        info!("Received server welcome message: {}", String::from_utf8_lossy(greeting));
-                    },
-                    _ => {
-                        info!("No welcome message received, continuing to send");
-                    }
-                }
-                
-                // Send data
+                // Send data immediately
                 if let Err(e) = send.write_all(message.as_bytes()).await {
                     error!("Failed to send data: {}", e);
                     continue;
@@ -177,7 +160,7 @@ async fn main() -> Result<()> {
                     continue;
                 }
                 
-                // Receive response
+                // Receive all response data
                 let timeout_duration = Duration::from_millis(args.timeout);
                 let result = tokio::time::timeout(
                     timeout_duration, 
