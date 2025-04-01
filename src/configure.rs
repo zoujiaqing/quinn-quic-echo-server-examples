@@ -83,7 +83,7 @@ impl ServerCertVerifier for SkipServerVerification {
             SignatureScheme::RSA_PKCS1_SHA256,
             SignatureScheme::ECDSA_NISTP256_SHA256,
             SignatureScheme::RSA_PSS_SHA256,
-            // 添加更多签名方案以确保全面支持
+            // Add more signature schemes to ensure comprehensive support
             SignatureScheme::RSA_PKCS1_SHA1,
             SignatureScheme::ECDSA_NISTP384_SHA384,
             SignatureScheme::ED25519,
@@ -255,7 +255,7 @@ pub fn generate_pem_cert_files(cert_path: impl AsRef<Path>, key_path: impl AsRef
     Ok(())
 }
 
-// 自定义客户端证书验证器 - 允许任何客户端证书
+// Custom client certificate verifier - allows any client certificate
 #[derive(Debug)]
 struct AllowAnyAuthenticatedClient(RootCertStore);
 
@@ -266,7 +266,7 @@ impl ClientCertVerifier for AllowAnyAuthenticatedClient {
         _intermediates: &[CertificateDer<'_>],
         _now: UnixTime,
     ) -> Result<ClientCertVerified, RustlsError> {
-        // 无条件接受任何客户端证书
+        // Unconditionally accept any client certificate
         Ok(ClientCertVerified::assertion())
     }
     
@@ -293,7 +293,7 @@ impl ClientCertVerifier for AllowAnyAuthenticatedClient {
             SignatureScheme::RSA_PKCS1_SHA256,
             SignatureScheme::ECDSA_NISTP256_SHA256,
             SignatureScheme::RSA_PSS_SHA256,
-            // 添加更多签名方案以确保全面支持
+            // Add more signature schemes to ensure comprehensive support
             SignatureScheme::RSA_PKCS1_SHA1,
             SignatureScheme::ECDSA_NISTP384_SHA384,
             SignatureScheme::ED25519,
@@ -309,46 +309,46 @@ impl ClientCertVerifier for AllowAnyAuthenticatedClient {
     }
 }
 
-// 新的配置方法，用于支持客户端证书验证
+// New configuration method for supporting client certificate validation
 pub fn configure_server_require_client_cert_with_der() -> Result<quinn::ServerConfig> {
-    // 读取服务器证书
+    // Read server certificate
     let cert = fs::read("cert.der").map_err(|e| anyhow!("Failed to read certificate: {}", e))?;
     let key = fs::read("key.der").map_err(|e| anyhow!("Failed to read private key: {}", e))?;
 
-    // 创建服务器证书链
+    // Create server certificate chain
     let cert_chain = vec![CertificateDer::from(cert.clone())];
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key));
 
-    // 创建根证书存储用于验证客户端证书
+    // Create root certificate store for validating client certificates
     let mut root_store = RootCertStore::empty();
     root_store.add(CertificateDer::from(cert)).map_err(|e| anyhow!("Failed to add certificate to root store: {}", e))?;
 
-    // 创建服务器配置要求客户端证书
+    // Create server configuration requiring client certificate
     let crypto = rustls::ServerConfig::builder()
         .with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient(root_store)))
         .with_single_cert(cert_chain, key)
         .map_err(|e| anyhow!("TLS configuration error: {}", e))?;
 
-    // 创建 QUIC 服务器配置
+    // Create QUIC server configuration
     let quic_server_config = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)
         .map_err(|e| anyhow!("QUIC configuration error: {}", e))?;
     
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server_config));
     
-    // 配置传输参数
+    // Configure transport parameters
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_idle_timeout(Some(Duration::from_secs(20).try_into().unwrap()));
     
     Ok(server_config)
 }
 
-// 新的配置方法，使用 PEM 文件并要求客户端证书验证 
+// New configuration method using PEM files and requiring client certificate validation 
 pub fn configure_server_require_client_cert_with_pem(cert_path: &str, key_path: &str) -> Result<quinn::ServerConfig> {
-    // 读取服务器证书和私钥
+    // Read server certificate and private key
     let cert_pem = fs::read_to_string(cert_path).map_err(|e| anyhow!("Failed to read certificate PEM file: {}", e))?;
     let key_pem = fs::read_to_string(key_path).map_err(|e| anyhow!("Failed to read private key PEM file: {}", e))?;
 
-    // 解析证书
+    // Parse certificates
     let certs = rustls_pemfile::certs(&mut std::io::Cursor::new(&cert_pem))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| anyhow!("Failed to parse certificate PEM: {}", e))?;
@@ -357,63 +357,63 @@ pub fn configure_server_require_client_cert_with_pem(cert_path: &str, key_path: 
         return Err(anyhow!("No certificates found in PEM file"));
     }
 
-    // 解析私钥
+    // Parse private key
     let key = rustls_pemfile::private_key(&mut std::io::Cursor::new(&key_pem))
         .map_err(|e| anyhow!("Failed to parse private key PEM: {}", e))?
         .ok_or_else(|| anyhow!("No private keys found in PEM file"))?;
 
-    // 创建根证书存储用于验证客户端证书
+    // Create root certificate store for validating client certificates
     let mut root_store = RootCertStore::empty();
     for cert in certs.clone() {
         root_store.add(cert).map_err(|e| anyhow!("Failed to add certificate to root store: {}", e))?;
     }
 
-    // 创建服务器配置要求客户端证书
+    // Create server configuration requiring client certificate
     let crypto = rustls::ServerConfig::builder()
         .with_client_cert_verifier(Arc::new(AllowAnyAuthenticatedClient(root_store)))
         .with_single_cert(certs, key)
         .map_err(|e| anyhow!("TLS configuration error: {}", e))?;
 
-    // 创建 QUIC 服务器配置
+    // Create QUIC server configuration
     let quic_server_config = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)
         .map_err(|e| anyhow!("QUIC configuration error: {}", e))?;
     
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_server_config));
     
-    // 配置传输参数
+    // Configure transport parameters
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_idle_timeout(Some(Duration::from_secs(20).try_into().unwrap()));
     
     Ok(server_config)
 }
 
-// 客户端配置方法，使用 DER 文件
+// Client configuration method using DER files
 pub fn configure_client_with_client_auth_der() -> Result<quinn::ClientConfig> {
-    // 读取客户端证书和私钥
+    // Read client certificate and private key
     let cert = fs::read("cert.der").map_err(|e| anyhow!("Failed to read certificate: {}", e))?;
     let key = fs::read("key.der").map_err(|e| anyhow!("Failed to read private key: {}", e))?;
 
-    // 创建客户端证书链
+    // Create client certificate chain
     let cert_chain = vec![CertificateDer::from(cert.clone())];
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key));
 
-    // 创建根证书存储
+    // Create root certificate store
     let mut roots = RootCertStore::empty();
     roots.add(CertificateDer::from(cert)).map_err(|e| anyhow!("Failed to add certificate to root store: {}", e))?;
 
-    // 创建客户端配置
+    // Create client configuration
     let client_crypto = rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_client_auth_cert(cert_chain, key)
         .map_err(|e| anyhow!("Client authentication error: {}", e))?;
 
-    // 创建 QUIC 客户端配置
+    // Create QUIC client configuration
     let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
         .map_err(|e| anyhow!("QUIC configuration error: {}", e))?;
     
     let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
     
-    // 配置传输参数
+    // Configure transport parameters
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(20).try_into().unwrap()));
     client_config.transport_config(Arc::new(transport_config));
@@ -421,43 +421,43 @@ pub fn configure_client_with_client_auth_der() -> Result<quinn::ClientConfig> {
     Ok(client_config)
 }
 
-/// 配置客户端使用PEM证书进行客户端认证，但不验证服务器证书（不安全模式）
+/// Configure client with PEM certificate for client authentication, but without server certificate validation (insecure mode)
 pub fn configure_client_with_client_auth_pem_insecure(cert_path: &str, key_path: &str) -> Result<quinn::ClientConfig> {
-    // 读取客户端证书和私钥
-    let cert_data = fs::read(cert_path).map_err(|e| anyhow!("无法读取证书文件 {}: {}", cert_path, e))?;
-    let key_data = fs::read(key_path).map_err(|e| anyhow!("无法读取私钥文件 {}: {}", key_path, e))?;
+    // Read client certificate and private key
+    let cert_data = fs::read(cert_path).map_err(|e| anyhow!("Cannot read certificate file {}: {}", cert_path, e))?;
+    let key_data = fs::read(key_path).map_err(|e| anyhow!("Cannot read private key file {}: {}", key_path, e))?;
     
-    // 解析客户端证书
+    // Parse client certificate
     let certs = rustls_pemfile::certs(&mut &*cert_data)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| anyhow!("无效的 PEM 编码证书: {}", e))?;
+        .map_err(|e| anyhow!("Invalid PEM encoded certificate: {}", e))?;
     
     if certs.is_empty() {
-        return Err(anyhow!("PEM 文件中没有找到证书"));
+        return Err(anyhow!("No certificates found in PEM file"));
     }
     
-    // 解析私钥
+    // Parse private key
     let key = rustls_pemfile::private_key(&mut &*key_data)
-        .map_err(|e| anyhow!("格式错误的私钥: {}", e))?
-        .ok_or_else(|| anyhow!("没有找到私钥"))?;
+        .map_err(|e| anyhow!("Malformed private key: {}", e))?
+        .ok_or_else(|| anyhow!("No private key found"))?;
     
-    // 创建完全不验证服务器证书的客户端配置
+    // Create client configuration that completely bypasses server certificate validation
     let client_crypto = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
         .with_client_auth_cert(certs, key)
-        .map_err(|e| anyhow!("设置客户端证书失败: {}", e))?;
+        .map_err(|e| anyhow!("Failed to set client certificate: {}", e))?;
     
-    // 确保客户端验证被正确配置
+    // Ensure client validation is properly configured
     let quinn_client_config = match quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto) {
         Ok(config) => config,
-        Err(e) => return Err(anyhow!("QUIC TLS配置错误: {}", e)),
+        Err(e) => return Err(anyhow!("QUIC TLS configuration error: {}", e)),
     };
     
-    // 创建 QUIC 客户端配置
+    // Create QUIC client configuration
     let mut client_config = quinn::ClientConfig::new(Arc::new(quinn_client_config));
     
-    // 配置传输参数
+    // Configure transport parameters
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(20).try_into().unwrap()));
     client_config.transport_config(Arc::new(transport_config));
@@ -465,13 +465,13 @@ pub fn configure_client_with_client_auth_pem_insecure(cert_path: &str, key_path:
     Ok(client_config)
 }
 
-// 客户端配置方法，使用 PEM 文件
+// Client configuration method using PEM files
 pub fn configure_client_with_client_auth_pem(cert_path: &str, key_path: &str) -> Result<quinn::ClientConfig> {
-    // 读取客户端证书和私钥
+    // Read client certificate and private key
     let cert_pem = fs::read_to_string(cert_path).map_err(|e| anyhow!("Failed to read certificate PEM file: {}", e))?;
     let key_pem = fs::read_to_string(key_path).map_err(|e| anyhow!("Failed to read private key PEM file: {}", e))?;
     
-    // 解析证书
+    // Parse certificates
     let certs = rustls_pemfile::certs(&mut std::io::Cursor::new(&cert_pem))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| anyhow!("Failed to parse certificate PEM: {}", e))?;
@@ -480,30 +480,30 @@ pub fn configure_client_with_client_auth_pem(cert_path: &str, key_path: &str) ->
         return Err(anyhow!("No certificates found in PEM file"));
     }
     
-    // 解析私钥
+    // Parse private key
     let key = rustls_pemfile::private_key(&mut std::io::Cursor::new(&key_pem))
         .map_err(|e| anyhow!("Failed to parse private key PEM: {}", e))?
         .ok_or_else(|| anyhow!("No private keys found in PEM file"))?;
 
-    // 创建根证书存储
+    // Create root certificate store
     let mut roots = RootCertStore::empty();
     for cert in certs.clone() {
         roots.add(cert).map_err(|e| anyhow!("Failed to add certificate to root store: {}", e))?;
     }
     
-    // 创建客户端配置
+    // Create client configuration
     let client_crypto = rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_client_auth_cert(certs.clone(), key)
         .map_err(|e| anyhow!("Client authentication error: {}", e))?;
     
-    // 创建 QUIC 客户端配置
+    // Create QUIC client configuration
     let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
         .map_err(|e| anyhow!("QUIC configuration error: {}", e))?;
     
     let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
     
-    // 配置传输参数
+    // Configure transport parameters
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(20).try_into().unwrap()));
     client_config.transport_config(Arc::new(transport_config));

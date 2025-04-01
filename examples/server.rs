@@ -43,31 +43,29 @@ struct Cli {
     #[clap(long)]
     insecure: bool,
 
-    /// 是否要求客户端证书
+    /// Whether to require client certificate
     #[clap(long, default_value = "false")]
     require_client_cert: bool,
 }
 
-// Custom server handler function
+// Custom server handler function that uses the core server's connection handler
+// but adds data collection functionality via channels
 async fn handle_connection(connection: Connection, sender: UnboundedSender<Vec<u8>>) -> Result<()> {
-    // 不再主动发送单向流的欢迎消息
-    // 改为在双向流中发送欢迎消息
-    
-    // Receive client messages and echo them back
-    while let Ok(stream) = connection.accept_bi().await {
-        let (mut send, mut recv) = stream;
+    // Wait for client to initiate bidirectional stream
+    while let Ok((mut send, mut recv)) = connection.accept_bi().await {
+        info!("Accepted new bidirectional stream");
         let sender = sender.clone();
-        let connection = connection.clone();
         
         tokio::spawn(async move {
-            // 立即发送欢迎消息
-            let hello_message = b"Hello Client";
-            if let Err(e) = send.write_all(hello_message).await {
+            // Send welcome message
+            let welcome_message = "Hello Client";
+            if let Err(e) = send.write_all(welcome_message.as_bytes()).await {
                 error!("Failed to write welcome message: {}", e);
                 return;
             }
-            info!("Sent 'Hello Client' to client in bi-directional stream");
+            info!("Sent welcome message: {}", welcome_message);
             
+            // Read and collect all data from the client
             let mut data = Vec::new();
             while let Some(chunk) = recv.read_chunk(4096, false).await.unwrap_or(None) {
                 data.extend_from_slice(&chunk.bytes);
@@ -85,7 +83,7 @@ async fn handle_connection(connection: Connection, sender: UnboundedSender<Vec<u
                     return;
                 }
                 
-                // Send to consumer
+                // Send to consumer for additional processing
                 let _ = sender.send(data.clone());
                 
                 // Print received message
@@ -176,32 +174,34 @@ async fn main() -> Result<()> {
     
     info!("Server endpoint created, listening on: {}", server_endpoint.local_addr()?);
     
-    // 创建数据通道
+    // Create data channel
     let (sender, receiver) = unbounded_channel();
     
-    // 创建 Cancellation Token
+    // Create Cancellation Token
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
     
-    // 设置 Ctrl+C 处理
+    // Set up Ctrl+C handler
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         info!("Ctrl+C received, shutting down...");
         cancel_clone.cancel();
     });
     
-    // 启动数据消费任务
+    // Start data consumer task
     tokio::spawn(consume_data(receiver));
     
-    // 使用自定义的连接处理器处理连接
-    let handle_conn = |conn: Connection| {
+    // Create an EchoServer with a custom handler
+    let echo_server = EchoServer::new(server_endpoint);
+    
+    // Use our custom handler with data collection capability
+    let handle_conn = move |conn: Connection| {
         let sender_clone = sender.clone();
         handle_connection(conn, sender_clone)
     };
     
-    // 使用 EchoServer
-    let echo_server = EchoServer::new(server_endpoint);
-    echo_server.run_server(cancel).await?;
+    // Use EchoServer with our custom handler
+    echo_server.run_server_with_handler(cancel, handle_conn).await?;
     
     info!("Server shut down");
     Ok(())

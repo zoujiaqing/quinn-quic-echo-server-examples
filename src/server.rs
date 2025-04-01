@@ -12,12 +12,12 @@ use {
     rustls::{RootCertStore, pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer}},
 };
 
-// 服务器结构体
+// Server struct
 pub struct Server {
     endpoint: Endpoint,
 }
 
-// 服务器实现
+// Server implementation
 impl Server {
     pub fn new(config: quinn::ServerConfig) -> Self {
         let socket = SocketAddr::from(([0, 0, 0, 0], 0));
@@ -28,136 +28,172 @@ impl Server {
 
     pub async fn listen(&self, addr: &str) -> Result<()> {
         let addr = SocketAddr::from_str(addr)?;
-        // 使用标准库重新绑定socket
+        // Use standard library to rebind socket
         let udp_socket = UdpSocket::bind(addr)?;
         self.endpoint.rebind(udp_socket)?;
-        info!("服务器监听地址: {}", addr);
+        info!("Server listening on: {}", addr);
 
         while let Some(conn) = self.endpoint.accept().await {
             let connection = conn.await?;
-            info!("接受来自 {} 的新连接", connection.remote_address());
+            info!("Accepted new connection from {}", connection.remote_address());
             
-            // 判断客户端是否提供了证书
+            // Check if client provided a certificate
             let remote_addr = connection.remote_address();
             let handshake_data = connection.handshake_data();
             
             if let Some(crypto_data) = handshake_data.and_then(|data| data.downcast::<quinn::crypto::rustls::HandshakeData>().ok()) {
-                // 成功建立连接，启动一个新的任务处理连接
-                info!("客户端连接：{}", remote_addr);
+                // Connection established successfully, start a new task to handle it
+                info!("Client connected: {}", remote_addr);
                 tokio::spawn(handle_connection(connection));
             } else {
-                info!("无法获取连接握手数据，拒绝连接: {}", remote_addr);
-                // 不处理此连接
+                info!("Unable to get connection handshake data, rejecting connection: {}", remote_addr);
+                // Skip processing this connection
             }
         }
 
-        info!("服务器已关闭");
+        info!("Server has closed");
         Ok(())
     }
 }
 
-// 处理客户端连接
-async fn handle_connection(connection: Connection) -> Result<()> {
-    info!("处理来自 {} 的连接", connection.remote_address());
+// Handle client connections with optional welcome message
+async fn handle_connection_with_welcome(connection: Connection, welcome_message: Option<String>) -> Result<()> {
+    info!("Handling connection from {}", connection.remote_address());
     
-    // 等待客户端发起双向流
+    // Wait for client to initiate bidirectional stream
     while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-        info!("接受到新的双向流");
+        info!("Accepted new bidirectional stream");
         
-        // 在双向流建立后立即发送欢迎消息
-        send.write_all(b"Hello Client").await?;
-        info!("发送欢迎消息: Hello Client");
+        // Send welcome message immediately after bidirectional stream is established
+        if let Some(message) = &welcome_message {
+            send.write_all(message.as_bytes()).await?;
+            info!("Sent welcome message: {}", message);
+        }
         
-        // 读取客户端消息
+        // Read messages from client
         let mut buffer = [0u8; 1024];
         while let Ok(Some(n)) = recv.read(&mut buffer).await {
             let message = &buffer[..n];
-            info!("收到消息: {}", String::from_utf8_lossy(message));
+            info!("Received message: {}", String::from_utf8_lossy(message));
             
-            // 回显消息
+            // Echo the message back
             send.write_all(message).await?;
-            info!("回显消息: {}", String::from_utf8_lossy(message));
+            info!("Echoed message: {}", String::from_utf8_lossy(message));
         }
     }
     
-    info!("连接已关闭: {}", connection.remote_address());
+    info!("Connection closed: {}", connection.remote_address());
     Ok(())
 }
 
-// 回显服务器实现 - 更简单的接口
+// Default handle_connection function with standard welcome message
+pub async fn handle_connection(connection: Connection) -> Result<()> {
+    handle_connection_with_welcome(connection, Some("Hello Client".to_string())).await
+}
+
+// Echo server implementation - simpler interface
 pub struct EchoServer {
     endpoint: Endpoint,
+    welcome_message: Option<String>,
 }
 
 impl EchoServer {
     pub fn new(endpoint: Endpoint) -> Self {
-        Self { endpoint }
+        Self { 
+            endpoint,
+            welcome_message: Some("Hello Client".to_string()),
+        }
+    }
+    
+    /// Create a new EchoServer with a custom welcome message
+    pub fn with_welcome_message(endpoint: Endpoint, message: Option<String>) -> Self {
+        Self {
+            endpoint,
+            welcome_message: message,
+        }
+    }
+    
+    /// Get the current welcome message
+    pub fn welcome_message(&self) -> Option<&String> {
+        self.welcome_message.as_ref()
+    }
+    
+    /// Set a new welcome message
+    pub fn set_welcome_message(&mut self, message: Option<String>) {
+        self.welcome_message = message;
     }
     
     pub async fn run_server(&self, cancel_token: CancellationToken) -> Result<()> {
-        info!("Echo服务器开始运行，地址: {}", self.endpoint.local_addr()?);
+        info!("Echo server started running, address: {}", self.endpoint.local_addr()?);
+        
+        let welcome_message = self.welcome_message.clone();
         
         tokio::select! {
             _ = async {
                 while let Some(conn) = self.endpoint.accept().await {
                     match conn.await {
                         Ok(connection) => {
-                            info!("新连接: {}", connection.remote_address());
-                            tokio::spawn(handle_connection(connection));
+                            info!("New connection: {}", connection.remote_address());
+                            let welcome = welcome_message.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = handle_connection_with_welcome(connection, welcome).await {
+                                    error!("Connection handling error: {}", e);
+                                }
+                            });
                         },
                         Err(e) => {
-                            error!("连接失败: {}", e);
+                            error!("Connection failed: {}", e);
                         }
                     }
                 }
             } => {},
             _ = cancel_token.cancelled() => {
-                info!("收到取消信号，服务器即将关闭");
+                info!("Received cancellation signal, server will shut down");
             }
         }
         
-        info!("Echo服务器已停止");
+        info!("Echo server has stopped");
         Ok(())
     }
     
-    // 新增方法，允许使用自定义连接处理函数
+    // New method allowing custom connection handler function
     pub async fn run_server_with_handler<F, Fut>(&self, cancel_token: CancellationToken, handler: F) -> Result<()>
     where
         F: Fn(Connection) -> Fut + Send + Sync + 'static + Clone,
         Fut: Future<Output = Result<()>> + Send + 'static,
     {
-        info!("Echo服务器开始运行，地址: {}", self.endpoint.local_addr()?);
+        info!("Echo server started running, address: {}", self.endpoint.local_addr()?);
         
         tokio::select! {
             _ = async {
                 while let Some(conn) = self.endpoint.accept().await {
                     match conn.await {
                         Ok(connection) => {
-                            info!("新连接: {}", connection.remote_address());
+                            info!("New connection: {}", connection.remote_address());
                             let handler = handler.clone();
                             tokio::spawn(async move {
                                 if let Err(e) = handler(connection).await {
-                                    error!("处理连接时出错: {}", e);
+                                    error!("Error handling connection: {}", e);
                                 }
                             });
                         },
                         Err(e) => {
-                            error!("连接失败: {}", e);
+                            error!("Connection failed: {}", e);
                         }
                     }
                 }
             } => {},
             _ = cancel_token.cancelled() => {
-                info!("收到取消信号，服务器即将关闭");
+                info!("Received cancellation signal, server will shut down");
             }
         }
         
-        info!("Echo服务器已停止");
+        info!("Echo server has stopped");
         Ok(())
     }
 }
 
-// 客户端模块
+// Client module
 pub struct Client {
     endpoint: Endpoint,
     config: quinn::ClientConfig,
@@ -178,7 +214,7 @@ impl Client {
     pub async fn connect(&self, addr: &str) -> Result<Connection> {
         let addr = SocketAddr::from_str(addr)?;
         let connection = self.endpoint.connect(addr, "localhost")?.await?;
-        info!("连接到服务器: {}", connection.remote_address());
+        info!("Connected to server: {}", connection.remote_address());
         Ok(connection)
     }
 }
@@ -191,14 +227,14 @@ mod tests {
     async fn test_echo() {
         let (client, connection) = setup().await;
         
-        // 发送测试消息
+        // Send test message
         let test_message = b"Hello, World!";
         let (mut send, mut recv) = connection.open_bi().await.unwrap();
         
         send.write_all(test_message).await.unwrap();
         send.finish().unwrap();
         
-        // 读取回显消息
+        // Read echoed message
         let mut buffer = Vec::new();
         let mut read_buf = [0u8; 1024];
         
@@ -206,12 +242,12 @@ mod tests {
             buffer.extend_from_slice(&read_buf[..n]);
         }
         
-        // 验证回显消息
+        // Verify echoed message
         assert_eq!(buffer, test_message);
     }
     
     async fn setup() -> (Client, Connection) {
-        // 创建服务器配置
+        // Create server configuration
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
         let cert_der = CertificateDer::from(cert.cert.der().to_vec());
         let priv_key = cert.key_pair.serialize_der();
@@ -222,17 +258,17 @@ mod tests {
         )
         .unwrap();
         
-        // 创建服务器
+        // Create server
         let server = Server::new(server_config);
         let server_addr = "127.0.0.1:0";
         tokio::spawn(async move {
             let _ = server.listen(server_addr).await;
         });
         
-        // 等待服务器启动
+        // Wait for server to start
         tokio::time::sleep(Duration::from_millis(100)).await;
         
-        // 创建客户端配置
+        // Create client configuration
         let mut roots = RootCertStore::empty();
         roots.add(cert_der.clone()).unwrap();
         
@@ -242,7 +278,7 @@ mod tests {
         
         let client_config = quinn::ClientConfig::new(Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto).unwrap()));
         
-        // 创建客户端
+        // Create client
         let client = Client::new(client_config);
         let connection = client.connect(server_addr).await.unwrap();
         

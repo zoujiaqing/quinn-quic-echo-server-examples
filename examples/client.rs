@@ -11,44 +11,44 @@ use {
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// 发送消息内容
+    /// Message content to send
     #[clap(short, long, default_value = "Hello, world!")]
     message: String,
     
-    /// 重复发送次数
+    /// Number of times to repeat sending
     #[clap(short, long, default_value = "1")]
     repeat: usize,
     
-    /// 超时时间（毫秒）
+    /// Timeout in milliseconds
     #[clap(short, long, default_value = "5000")]
     timeout: u64,
     
-    /// 不验证证书（不安全模式）
+    /// Don't validate certificates (insecure mode)
     #[clap(long)]
     insecure: bool,
 
-    /// 使用 PEM 证书
+    /// Use PEM certificate
     #[clap(long)]
     usepem: bool,
     
-    /// 证书文件路径
+    /// Certificate file path
     #[clap(long)]
     cert_pem: Option<String>,
     
-    /// 私钥文件路径
+    /// Private key file path
     #[clap(long)]
     key_pem: Option<String>,
     
-    /// 服务器地址
+    /// Server address
     #[clap(long, default_value = "127.0.0.1:5001")]
     server: String,
     
-    /// 是否启用客户端证书认证
+    /// Enable client certificate authentication
     #[clap(long)]
     client_auth: bool,
 }
 
-// 用于读取数据流
+// Function to read data from a stream
 async fn read_stream(mut stream: RecvStream) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     
@@ -61,76 +61,76 @@ async fn read_stream(mut stream: RecvStream) -> Result<Vec<u8>> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 初始化日志
+    // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
         .with_ansi(true)
         .init();
 
-    // 解析命令行参数
+    // Parse command line arguments
     let args = Cli::parse();
 
-    // 配置客户端
+    // Configure client
     let client_config = if args.usepem && args.cert_pem.is_some() && args.client_auth && args.key_pem.is_some() {
-        // 带客户端认证的 PEM 模式（优先级最高）
+        // PEM mode with client authentication (highest priority)
         let cert_path = args.cert_pem.as_ref().unwrap();
         let key_path = args.key_pem.as_ref().unwrap();
-        info!("使用 PEM 证书进行客户端认证: 证书={}, 密钥={}", cert_path, key_path);
+        info!("Using PEM certificate for client authentication: cert={}, key={}", cert_path, key_path);
         
         if args.insecure {
-            info!("启用不安全模式 - 跳过服务器证书验证");
+            info!("Enabling insecure mode - skipping server certificate validation");
             configure::configure_client_with_client_auth_pem_insecure(cert_path, key_path)?
         } else {
             configure::configure_client_with_client_auth_pem(cert_path, key_path)?
         }
     } else if args.usepem && args.cert_pem.is_some() {
-        // 只用 PEM 证书验证服务器
+        // Using PEM certificate to validate server only
         let cert_path = args.cert_pem.as_ref().unwrap();
-        info!("使用 PEM 证书: {}", cert_path);
+        info!("Using PEM certificate: {}", cert_path);
         
         if args.insecure {
-            info!("启用不安全模式 - 跳过服务器证书验证");
+            info!("Enabling insecure mode - skipping server certificate validation");
             configure::configure_client_insecure()
         } else {
             configure::configure_client_with_pem_cert(cert_path)
-                .context("配置带 PEM 证书的客户端失败")?
+                .context("Failed to configure client with PEM certificate")?
         }
     } else if args.insecure {
-        // 不安全模式（不验证证书）
-        info!("使用不安全模式（无证书验证）");
+        // Insecure mode (no certificate validation)
+        info!("Using insecure mode (no certificate validation)");
         configure::configure_client_insecure()
     } else {
-        // 默认不安全模式
-        info!("未指定证书，使用不安全模式");
+        // Default insecure mode
+        info!("No certificate specified, using insecure mode");
         configure::configure_client_insecure()
     };
     
-    // 创建客户端端点
+    // Create client endpoint
     let bind_addr = SocketAddr::new("0.0.0.0".parse::<IpAddr>()?, 0);
     let mut endpoint = Endpoint::client(bind_addr)?;
     endpoint.set_default_client_config(client_config);
 
-    // 连接到服务器
+    // Connect to server
     let server_addr = args.server.parse::<SocketAddr>()
-        .context("无效的服务器地址")?;
-    info!("连接到服务器: {}", server_addr);
+        .context("Invalid server address")?;
+    info!("Connecting to server: {}", server_addr);
     
-    // 增加连接超时
+    // Add connection timeout
     let conn_result = endpoint.connect(server_addr, "localhost")?;
     let connection = tokio::time::timeout(
-        Duration::from_secs(10), // 增加到10秒
+        Duration::from_secs(10), // Increased to 10 seconds
         conn_result
     )
     .await
-    .map_err(|_| anyhow!("连接服务器超时"))?
-    .map_err(|e| anyhow!("连接服务器失败: {}", e))?;
+    .map_err(|_| anyhow!("Connection to server timed out"))?
+    .map_err(|e| anyhow!("Failed to connect to server: {}", e))?;
     
-    info!("连接成功: {}", connection.remote_address());
+    info!("Connection successful: {}", connection.remote_address());
     
-    // 提示用户服务器通信已建立，准备发送消息
-    info!("服务器连接已建立，准备发送消息...");
+    // Inform user that server communication is established, ready to send messages
+    info!("Server connection established, preparing to send messages...");
     
-    // 发送消息
+    // Send messages
     for i in 0..args.repeat {
         let message = if args.repeat > 1 {
             format!("{} ({})", args.message, i + 1)
@@ -138,46 +138,46 @@ async fn main() -> Result<()> {
             args.message.clone()
         };
         
-        info!("发送消息: {}", message);
+        info!("Sending message: {}", message);
         
-        // 创建双向流
+        // Create bidirectional stream
         let bi_stream = tokio::time::timeout(
-            Duration::from_secs(5), // 5秒超时
+            Duration::from_secs(5), // 5 second timeout
             connection.open_bi()
         ).await;
         
         match bi_stream {
             Ok(Ok((mut send, mut recv))) => {
-                // 首先尝试读取服务器的欢迎消息（使用peek方法不消费数据）
+                // First try to read server's welcome message (using peek method without consuming data)
                 let mut peek_buf = [0u8; 1024];
                 let greeting_result = tokio::time::timeout(
-                    Duration::from_millis(1000), // 1秒超时
+                    Duration::from_millis(1000), // 1 second timeout
                     recv.read(&mut peek_buf)
                 ).await;
                 
                 match greeting_result {
                     Ok(Ok(Some(n))) if n > 0 => {
                         let greeting = &peek_buf[..n];
-                        info!("收到服务器欢迎消息: {}", String::from_utf8_lossy(greeting));
+                        info!("Received server welcome message: {}", String::from_utf8_lossy(greeting));
                     },
                     _ => {
-                        info!("未收到欢迎消息，继续发送");
+                        info!("No welcome message received, continuing to send");
                     }
                 }
                 
-                // 发送数据
+                // Send data
                 if let Err(e) = send.write_all(message.as_bytes()).await {
-                    error!("发送数据失败: {}", e);
+                    error!("Failed to send data: {}", e);
                     continue;
                 }
                 
-                // 关闭发送方向
+                // Close send direction
                 if let Err(e) = send.finish() {
-                    error!("结束流失败: {}", e);
+                    error!("Failed to finish stream: {}", e);
                     continue;
                 }
                 
-                // 接收回应
+                // Receive response
                 let timeout_duration = Duration::from_millis(args.timeout);
                 let result = tokio::time::timeout(
                     timeout_duration, 
@@ -187,35 +187,35 @@ async fn main() -> Result<()> {
                 match result {
                     Ok(Ok(data)) => {
                         let response = String::from_utf8_lossy(&data);
-                        info!("收到回应: {}", response);
+                        info!("Received response: {}", response);
                     },
                     Ok(Err(e)) => {
-                        error!("读取回应时出错: {}", e);
+                        error!("Error reading response: {}", e);
                     },
                     Err(_) => {
-                        error!("接收回应超时 ({}ms)", args.timeout);
+                        error!("Receive response timed out ({}ms)", args.timeout);
                     }
                 }
             },
             Ok(Err(e)) => {
-                error!("打开双向流失败: {}", e);
+                error!("Failed to open bidirectional stream: {}", e);
             },
             Err(_) => {
-                error!("打开双向流超时");
+                error!("Opening bidirectional stream timed out");
             }
         }
         
-        // 如果有多条消息，且不是最后一条，则添加延迟
+        // If there are multiple messages, and this is not the last one, add a delay
         if i < args.repeat - 1 {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
     
-    // 关闭连接
-    info!("关闭连接...");
+    // Close connection
+    info!("Closing connection...");
     connection.close(0u32.into(), b"client_close");
     endpoint.wait_idle().await;
     
-    info!("客户端退出");
+    info!("Client exited");
     Ok(())
 } 
