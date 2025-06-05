@@ -34,7 +34,7 @@ async fn test_echo_performance() -> Result<f64, Box<dyn std::error::Error>> {
     let server_handle = {
         let cancel = cancel.clone();
         tokio::spawn(async move { 
-            echo_server.run_server(cancel).await 
+            echo_server.run(cancel).await 
         })
     };
 

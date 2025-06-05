@@ -1,28 +1,13 @@
 use {
-    anyhow::{Result, Context, anyhow},
+    anyhow::Result,
     clap::Parser,
-    quinn::{Connection, Endpoint, RecvStream},
-    std::net::{IpAddr, SocketAddr},
-    std::time::Duration,
-    quinn_echo_server::configure,
-    tracing::{info, error, warn},
+    quinn_echo_server::{configure, server::EchoClient},
+    tracing::info,
 };
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Message content to send
-    #[clap(short, long, default_value = "Hello, world!")]
-    message: String,
-    
-    /// Number of times to repeat sending
-    #[clap(short, long, default_value = "1")]
-    repeat: usize,
-    
-    /// Timeout in milliseconds
-    #[clap(short, long, default_value = "5000")]
-    timeout: u64,
-    
     /// Don't validate certificates (insecure mode)
     #[clap(long)]
     insecure: bool,
@@ -44,17 +29,6 @@ struct Cli {
     client_auth: bool,
 }
 
-// Function to read data from a stream
-async fn read_stream(mut stream: RecvStream) -> Result<Vec<u8>> {
-    let mut data = Vec::new();
-    
-    while let Some(chunk) = stream.read_chunk(1024, false).await? {
-        data.extend_from_slice(&chunk.bytes);
-    }
-    
-    Ok(data)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -63,134 +37,53 @@ async fn main() -> Result<()> {
         .with_ansi(true)
         .init();
 
-    // Parse command line arguments
     let args = Cli::parse();
+    info!("QUIC Echo Client connecting to: {}", args.server);
 
-    // Configure client
+    // Configure client based on arguments
     let client_config = if args.cert_pem.is_some() && args.client_auth && args.key_pem.is_some() {
-        // PEM mode with client authentication (highest priority)
+        // Client authentication mode
         let cert_path = args.cert_pem.as_ref().unwrap();
         let key_path = args.key_pem.as_ref().unwrap();
-        info!("Using PEM certificate for client authentication: cert={}, key={}", cert_path, key_path);
+        info!("Using client certificate authentication: cert={}, key={}", cert_path, key_path);
         
         if args.insecure {
-            info!("Enabling insecure mode - skipping server certificate validation");
+            info!("Client auth with insecure server verification");
             configure::configure_client_with_client_auth_pem_insecure(cert_path, key_path)?
         } else {
             configure::configure_client_with_client_auth_pem(cert_path, key_path)?
         }
     } else if args.cert_pem.is_some() {
-        // Using PEM certificate to validate server only
+        // Server validation only
         let cert_path = args.cert_pem.as_ref().unwrap();
-        info!("Using PEM certificate to validate server: {}", cert_path);
+        info!("Using certificate to validate server: {}", cert_path);
         
         if args.insecure {
-            info!("Enabling insecure mode - skipping server certificate validation");
+            info!("Insecure mode enabled (ignoring certificate)");
             configure::configure_client_insecure()
         } else {
-            configure::configure_client_with_pem_cert(cert_path)
-                .context("Failed to configure client with PEM certificate")?
+            configure::configure_client_with_pem_cert(cert_path)?
         }
     } else {
-        // Default: insecure mode (for testing and convenience)
+        // Default: insecure mode
         info!("Using insecure mode (no certificate validation)");
         configure::configure_client_insecure()
     };
-    
-    // Create client endpoint
-    let bind_addr = SocketAddr::new("0.0.0.0".parse::<IpAddr>()?, 0);
-    let mut endpoint = Endpoint::client(bind_addr)?;
-    endpoint.set_default_client_config(client_config);
 
-    // Connect to server
-    let server_addr = args.server.parse::<SocketAddr>()
-        .context("Invalid server address")?;
-    info!("Connecting to server: {}", server_addr);
+    // Fixed message for simplicity and automation
+    let message = "Hello server!";
+
+    // Create client and connect
+    let server_addr: std::net::SocketAddr = args.server.parse()?;
+    let client = EchoClient::new(client_config);
     
-    // Add connection timeout
-    let conn_result = endpoint.connect(server_addr, "localhost")?;
-    let connection = tokio::time::timeout(
-        Duration::from_secs(10), // Increased to 10 seconds
-        conn_result
-    )
-    .await
-    .map_err(|_| anyhow!("Connection to server timed out"))?
-    .map_err(|e| anyhow!("Failed to connect to server: {}", e))?;
+    // Step 1: Connect to server
+    let connection = client.connect(server_addr).await?;
     
-    info!("Connection successful: {}", connection.remote_address());
-    
-    // Inform user that server communication is established, ready to send messages
-    info!("Server connection established, preparing to send messages...");
-    
-    // Send messages
-    for i in 0..args.repeat {
-        let message = if args.repeat > 1 {
-            format!("{} ({})", args.message, i + 1)
-        } else {
-            args.message.clone()
-        };
-        
-        info!("Sending message: {}", message);
-        
-        // Create bidirectional stream
-        let bi_stream = tokio::time::timeout(
-            Duration::from_secs(5), // 5 second timeout
-            connection.open_bi()
-        ).await;
-        
-        match bi_stream {
-            Ok(Ok((mut send, mut recv))) => {
-                // Send data immediately
-                if let Err(e) = send.write_all(message.as_bytes()).await {
-                    error!("Failed to send data: {}", e);
-                    continue;
-                }
-                
-                // Close send direction
-                if let Err(e) = send.finish() {
-                    error!("Failed to finish stream: {}", e);
-                    continue;
-                }
-                
-                // Receive all response data
-                let timeout_duration = Duration::from_millis(args.timeout);
-                let result = tokio::time::timeout(
-                    timeout_duration, 
-                    read_stream(recv)
-                ).await;
-                
-                match result {
-                    Ok(Ok(data)) => {
-                        let response = String::from_utf8_lossy(&data);
-                        info!("Received response: {}", response);
-                    },
-                    Ok(Err(e)) => {
-                        error!("Error reading response: {}", e);
-                    },
-                    Err(_) => {
-                        error!("Receive response timed out ({}ms)", args.timeout);
-                    }
-                }
-            },
-            Ok(Err(e)) => {
-                error!("Failed to open bidirectional stream: {}", e);
-            },
-            Err(_) => {
-                error!("Opening bidirectional stream timed out");
-            }
-        }
-        
-        // If there are multiple messages, and this is not the last one, add a delay
-        if i < args.repeat - 1 {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }
-    
-    // Close connection
-    info!("Closing connection...");
-    connection.close(0u32.into(), b"client_close");
-    endpoint.wait_idle().await;
-    
-    info!("Client exited");
+    // Step 2: Send message and receive echo
+    let echo = EchoClient::echo_message(&connection, message).await?;
+    info!("Echo received: {}", echo);
+
+    info!("Client completed successfully");
     Ok(())
 } 
