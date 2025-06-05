@@ -222,10 +222,11 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rcgen;
     
     #[tokio::test]
     async fn test_echo() {
-        let (client, connection) = setup().await;
+        let (_client, connection) = setup().await;
         
         // Send test message
         let test_message = b"Hello, World!";
@@ -234,7 +235,7 @@ mod tests {
         send.write_all(test_message).await.unwrap();
         send.finish().unwrap();
         
-        // Read echoed message
+        // Read echoed message (includes welcome message + original message)
         let mut buffer = Vec::new();
         let mut read_buf = [0u8; 1024];
         
@@ -242,8 +243,9 @@ mod tests {
             buffer.extend_from_slice(&read_buf[..n]);
         }
         
-        // Verify echoed message
-        assert_eq!(buffer, test_message);
+        // Verify echoed message contains both welcome message and original message
+        let expected = b"Hello ClientHello, World!";
+        assert_eq!(buffer, expected);
     }
     
     async fn setup() -> (Client, Connection) {
@@ -258,11 +260,16 @@ mod tests {
         )
         .unwrap();
         
-        // Create server
-        let server = Server::new(server_config);
-        let server_addr = "127.0.0.1:0";
+        // Create server with a random port
+        let server_socket = SocketAddr::from(([127, 0, 0, 1], 0));
+        let server_endpoint = Endpoint::server(server_config, server_socket).unwrap();
+        let server_addr = server_endpoint.local_addr().unwrap();
+        
+        // Start server
+        let echo_server = EchoServer::new(server_endpoint);
+        let cancel_token = CancellationToken::new();
         tokio::spawn(async move {
-            let _ = server.listen(server_addr).await;
+            let _ = echo_server.run_server(cancel_token).await;
         });
         
         // Wait for server to start
@@ -280,7 +287,7 @@ mod tests {
         
         // Create client
         let client = Client::new(client_config);
-        let connection = client.connect(server_addr).await.unwrap();
+        let connection = client.connect(&server_addr.to_string()).await.unwrap();
         
         (client, connection)
     }

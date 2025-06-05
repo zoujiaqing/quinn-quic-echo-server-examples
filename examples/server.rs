@@ -3,9 +3,6 @@ use {
     clap::Parser,
     quinn::{Endpoint, Connection, RecvStream, SendStream},
     std::net::SocketAddr,
-    std::fs::File,
-    std::io::Write,
-    std::path::PathBuf,
     tokio::{
         io::AsyncWriteExt,
         sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -22,14 +19,6 @@ struct Cli {
     /// Listen address
     #[clap(default_value = "127.0.0.1:5001")]
     listen_address: SocketAddr,
-    
-    /// Path to save/load the certificate (if not specified, insecure mode is used)
-    #[clap(long)]
-    cert: Option<PathBuf>,
-
-    /// Use PEM certificate and key files
-    #[clap(long)]
-    usepem: bool,
 
     /// Path to PEM certificate file
     #[clap(long)]
@@ -38,10 +27,6 @@ struct Cli {
     /// Path to PEM private key file
     #[clap(long)]
     key_pem: Option<String>,
-
-    /// Use insecure mode (ignore certificate verification)
-    #[clap(long)]
-    insecure: bool,
 
     /// Whether to require client certificate
     #[clap(long, default_value = "false")]
@@ -122,12 +107,7 @@ async fn main() -> Result<()> {
     // Configure server
     info!("Configuring server...");
     
-    let server_endpoint = if args.insecure {
-        // Insecure mode
-        info!("Using insecure mode (no certificate verification)");
-        let server_config = configure::configure_server_insecure(1500 * 100);
-        Endpoint::server(server_config, args.listen_address)?
-    } else if args.usepem && args.cert_pem.is_some() && args.key_pem.is_some() {
+    let server_endpoint = if args.cert_pem.is_some() && args.key_pem.is_some() {
         // PEM certificate mode
         let cert_path = args.cert_pem.unwrap();
         let key_path = args.key_pem.unwrap();
@@ -145,29 +125,9 @@ async fn main() -> Result<()> {
         };
         
         Endpoint::server(server_config, args.listen_address)?
-    } else if let Some(cert_path) = &args.cert {
-        // Default certificate mode
-        info!("Using certificate mode with path: {}", cert_path.display());
-        
-        let (server_config, server_cert) = configure::configure_server(1500 * 100);
-        
-        // Save certificate to file if it doesn't exist
-        if !cert_path.exists() {
-            info!("Certificate file not found, generating and saving...");
-            let cert_bytes = server_cert.as_ref();
-            info!("Certificate size: {} bytes", cert_bytes.len());
-            let mut file = File::create(cert_path)
-                .with_context(|| format!("Failed to create certificate file: {}", cert_path.display()))?;
-            file.write_all(cert_bytes)?;
-            info!("Certificate saved to: {}", cert_path.display());
-        } else {
-            info!("Using existing certificate file: {}", cert_path.display());
-        }
-        
-        Endpoint::server(server_config, args.listen_address)?
     } else {
-        // Default built-in self-signed certificate
-        info!("Using default self-signed certificate mode");
+        // Default: insecure mode (perfect for testing)
+        info!("Using default insecure mode (no certificate validation required)");
         let (server_config, _) = configure::configure_server(1500 * 100);
         Endpoint::server(server_config, args.listen_address)?
     };

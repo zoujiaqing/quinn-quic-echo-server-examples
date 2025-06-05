@@ -26,10 +26,6 @@ struct Cli {
     /// Don't validate certificates (insecure mode)
     #[clap(long)]
     insecure: bool,
-
-    /// Use PEM certificate
-    #[clap(long)]
-    usepem: bool,
     
     /// Certificate file path
     #[clap(long)]
@@ -71,7 +67,7 @@ async fn main() -> Result<()> {
     let args = Cli::parse();
 
     // Configure client
-    let client_config = if args.usepem && args.cert_pem.is_some() && args.client_auth && args.key_pem.is_some() {
+    let client_config = if args.cert_pem.is_some() && args.client_auth && args.key_pem.is_some() {
         // PEM mode with client authentication (highest priority)
         let cert_path = args.cert_pem.as_ref().unwrap();
         let key_path = args.key_pem.as_ref().unwrap();
@@ -83,10 +79,10 @@ async fn main() -> Result<()> {
         } else {
             configure::configure_client_with_client_auth_pem(cert_path, key_path)?
         }
-    } else if args.usepem && args.cert_pem.is_some() {
+    } else if args.cert_pem.is_some() {
         // Using PEM certificate to validate server only
         let cert_path = args.cert_pem.as_ref().unwrap();
-        info!("Using PEM certificate: {}", cert_path);
+        info!("Using PEM certificate to validate server: {}", cert_path);
         
         if args.insecure {
             info!("Enabling insecure mode - skipping server certificate validation");
@@ -95,13 +91,9 @@ async fn main() -> Result<()> {
             configure::configure_client_with_pem_cert(cert_path)
                 .context("Failed to configure client with PEM certificate")?
         }
-    } else if args.insecure {
-        // Insecure mode (no certificate validation)
-        info!("Using insecure mode (no certificate validation)");
-        configure::configure_client_insecure()
     } else {
-        // Default insecure mode
-        info!("No certificate specified, using insecure mode");
+        // Default: insecure mode (for testing and convenience)
+        info!("Using insecure mode (no certificate validation)");
         configure::configure_client_insecure()
     };
     

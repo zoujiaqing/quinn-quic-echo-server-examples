@@ -127,21 +127,7 @@ pub fn configure_server(recv_window_size: u32) -> (quinn::ServerConfig, Certific
     (our_cfg, our_cert)
 }
 
-/// Build server configuration without certificate verification
-pub fn configure_server_insecure(recv_window_size: u32) -> quinn::ServerConfig {
-    // Generate self-signed certificate, but don't require client verification
-    let (cert, key) = gen_cert();
-    let mut server_config = quinn::ServerConfig::with_single_cert(
-        vec![cert.clone()], 
-        key.into()
-    ).unwrap();
-    
-    let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.receive_window(recv_window_size.into());
-    transport_config.max_idle_timeout(Some(Duration::from_secs(20).try_into().unwrap()));
-    
-    server_config
-}
+
 
 fn gen_cert() -> (CertificateDer<'static>, PrivatePkcs8KeyDer<'static>) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
