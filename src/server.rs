@@ -56,18 +56,18 @@ impl Server {
     }
 }
 
-// Handle client connections with optional welcome message
-async fn handle_connection_with_welcome(connection: Connection, welcome_message: Option<String>) -> Result<()> {
+// Handle client connections with configurable options
+async fn handle_connection_with_options(connection: Connection, initial_message: Option<String>) -> Result<()> {
     info!("Handling connection from {}", connection.remote_address());
     
     // Wait for client to initiate bidirectional stream
     while let Ok((mut send, mut recv)) = connection.accept_bi().await {
         info!("Accepted new bidirectional stream");
         
-        // Send welcome message immediately after bidirectional stream is established
-        if let Some(message) = &welcome_message {
+        // Send initial message immediately after bidirectional stream is established
+        if let Some(message) = &initial_message {
             send.write_all(message.as_bytes()).await?;
-            info!("Sent welcome message: {}", message);
+            info!("Sent initial message: {}", message);
         }
         
         // Read messages from client
@@ -86,47 +86,47 @@ async fn handle_connection_with_welcome(connection: Connection, welcome_message:
     Ok(())
 }
 
-// Default handle_connection function with standard welcome message
+// Default handle_connection function with standard initial greeting
 pub async fn handle_connection(connection: Connection) -> Result<()> {
-    handle_connection_with_welcome(connection, Some("Hello Client".to_string())).await
+    handle_connection_with_options(connection, Some("Hello Client".to_string())).await
 }
 
 // Echo server implementation - simpler interface
 pub struct EchoServer {
     endpoint: Endpoint,
-    welcome_message: Option<String>,
+    initial_message: Option<String>,
 }
 
 impl EchoServer {
     pub fn new(endpoint: Endpoint) -> Self {
         Self { 
             endpoint,
-            welcome_message: Some("Hello Client".to_string()),
+            initial_message: Some("Hello Client".to_string()),
         }
     }
     
-    /// Create a new EchoServer with a custom welcome message
-    pub fn with_welcome_message(endpoint: Endpoint, message: Option<String>) -> Self {
+    /// Create a new EchoServer with a custom initial message
+    pub fn with_initial_message(endpoint: Endpoint, message: Option<String>) -> Self {
         Self {
             endpoint,
-            welcome_message: message,
+            initial_message: message,
         }
     }
     
-    /// Get the current welcome message
-    pub fn welcome_message(&self) -> Option<&String> {
-        self.welcome_message.as_ref()
+    /// Get the current initial message
+    pub fn initial_message(&self) -> Option<&String> {
+        self.initial_message.as_ref()
     }
     
-    /// Set a new welcome message
-    pub fn set_welcome_message(&mut self, message: Option<String>) {
-        self.welcome_message = message;
+    /// Set a new initial message
+    pub fn set_initial_message(&mut self, message: Option<String>) {
+        self.initial_message = message;
     }
     
     pub async fn run_server(&self, cancel_token: CancellationToken) -> Result<()> {
         info!("Echo server started running, address: {}", self.endpoint.local_addr()?);
         
-        let welcome_message = self.welcome_message.clone();
+        let initial_message = self.initial_message.clone();
         
         tokio::select! {
             _ = async {
@@ -134,9 +134,9 @@ impl EchoServer {
                     match conn.await {
                         Ok(connection) => {
                             info!("New connection: {}", connection.remote_address());
-                            let welcome = welcome_message.clone();
+                            let initial = initial_message.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = handle_connection_with_welcome(connection, welcome).await {
+                                if let Err(e) = handle_connection_with_options(connection, initial).await {
                                     error!("Connection handling error: {}", e);
                                 }
                             });
